@@ -1,0 +1,318 @@
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Spotify Pomodoro Playlist Generator</title>
+    <link rel="stylesheet" href="https://code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css">
+    <script src="https://code.jquery.com/jquery-1.12.4.js"></script>
+    <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.js"></script>
+    <script language="javascript">
+
+    $( function() {
+        const socket = new WebSocket('ws://' + window.location.host + '/api')
+
+        socket.addEventListener('open', function(event) {
+            logMessage("WebSocket connected")
+            startup()
+        })
+
+        socket.addEventListener('message', function(event) {
+            parsed = JSON.parse(event.data)
+            if (parsed["type"] == "message") {
+                logMessage("Server: " + parsed["text"])
+            }
+            else if (parsed["type"] == "authenticate") {
+                authenticate(parsed["client_id"])
+            }
+        })
+
+        var client_code = ""
+
+        function startup()
+        {
+            var urlParams = new URLSearchParams(window.location.search)
+            if (urlParams.has("code")) {
+                window.localStorage.setItem("client_code", urlParams.get("code"))
+            }
+
+            client_code = window.localStorage.getItem("client_code")
+
+            playlist_name = window.localStorage.getItem("playlist_name") || "Pomodoro"
+            key = parseInt(window.localStorage.getItem("key")) || 0
+            mode = parseInt(window.localStorage.getItem("mode")) || 0
+            toggle_major_minor = (window.localStorage.getItem("toggle_major_minor") == "true") || false
+            strategy = parseInt(window.localStorage.getItem("strategy")) || 0
+            playlist_duration = parseInt(window.localStorage.getItem("playlist_duration")) || 60
+            min_duration = parseInt(window.localStorage.getItem("min_duration")) || 0
+            max_duration = parseInt(window.localStorage.getItem("max_duration")) || 60
+            min_energy = window.localStorage.getItem("min_energy") || 0
+            max_energy = window.localStorage.getItem("max_energy") || 1
+            
+            $('#playlist_name').val(playlist_name)
+            $('#key').prop('selectedIndex', key * 2 + mode)
+            $('#toggle_major_minor').prop('checked', toggle_major_minor)
+            $('#strategy').prop('selectedIndex', strategy)
+            $('#playlist_duration').slider("value", playlist_duration)
+            $('#song_duration_range').slider("values", [min_duration, max_duration])
+            $('#song_energy_range').slider("values", [min_energy, max_energy])
+
+            update()
+
+            if (client_code == "") {
+                generate()
+                return;
+            }
+
+            socket.send(JSON.stringify({
+                'type': 'authenticate',
+                'client_code': client_code,
+                'redirect_uri': "http://" + window.location.host + "/"
+            }))
+        }
+
+        function authenticate(client_id)
+        {
+            auth_url = "https://accounts.spotify.com/authorize?client_id=" + client_id
+            auth_url += "&redirect_uri=http://" + window.location.host + "/&response_type=code&scope=playlist-read-private%20playlist-modify-public%20playlist-modify-private%20user-library-read"
+
+            window.location.replace(auth_url)
+        }
+
+        function generate()
+        {
+            socket.send(JSON.stringify({
+                'type': 'generate',
+                'client_code': client_code,
+                'redirect_uri': "http://" + window.location.host + "/",
+                'playlist_name': playlist_name,
+                'key': key,
+                'mode': mode,
+                'strategy': strategy,
+                'toggle_major_minor': toggle_major_minor,
+                'playlist_duration': playlist_duration,
+                'min_duration': min_duration,
+                'max_duration': max_duration,
+                'min_energy': min_energy,
+                'max_energy': max_energy,
+            }))
+        }
+
+        function update()
+        {
+            playlist_name = $('#playlist_name').val()
+            key = Math.floor($('#key').prop('selectedIndex') / 2)
+            mode = $('#key').prop('selectedIndex') % 2
+            toggle_major_minor = $('#toggle_major_minor').is(':checked')
+            strategy = $('#strategy').prop('selectedIndex')
+            playlist_duration = $('#playlist_duration').slider('value')
+            min_duration = $('#song_duration_range').slider('values', 0)
+            max_duration = $('#song_duration_range').slider('values', 1)
+            min_energy = $('#song_energy_range').slider('values', 0)
+            max_energy = $('#song_energy_range').slider('values', 1)
+
+            window.localStorage.setItem("playlist_name", playlist_name)
+            window.localStorage.setItem("key", key)
+            window.localStorage.setItem("mode", mode)
+            window.localStorage.setItem("toggle_major_minor", toggle_major_minor)
+            window.localStorage.setItem("strategy", strategy)
+            window.localStorage.setItem("playlist_duration", playlist_duration)
+            window.localStorage.setItem("min_duration", min_duration)
+            window.localStorage.setItem("max_duration", max_duration)
+            window.localStorage.setItem("min_energy", min_energy)
+            window.localStorage.setItem("max_energy", max_energy)
+
+            $('#playlist_duration_text').val('Playist duration (' + $('#playlist_duration').slider('value') + ' mins)');
+            $('#song_duration_range_text').val('Song duration (' + $('#song_duration_range').slider('values', 0 ) + ' - ' + $('#song_duration_range').slider('values', 1) + ' mins)');
+            $('#song_energy_range_text').val('Song energy (' + $('#song_energy_range').slider('values', 0 ) + ' - ' + $('#song_energy_range').slider('values', 1) + ')');
+        }
+
+        function logMessage(str)
+        {
+            log = $("#log")
+            log.val(log.val() + "> " + str + "\n")
+            log.scrollTop(log.prop('scrollHeight'))
+        }
+
+        $("#key").change( function() { update(); })
+        $("#strategy").change( function() { update(); })
+        $("#toggle_major_minor").change( function() { update(); })
+        $("#playlist_name").change( function() { update(); })
+        $('#playlist_duration').on('slidestop', function() { update(); })
+        $('#song_duration_range').on('slidestop', function() { update(); })
+        $('#song_energy_range').on('slidestop', function() { update(); })
+
+        $('#playlist_duration').slider({
+            min: 0,
+            max: 120,
+            value: 60,
+            slide: function( event, ui ) {
+                $('#playlist_duration_text').val('Playist duration (' + ui.value + ' mins)');
+            }
+        });
+
+        $('#song_duration_range').slider({
+            range: true,
+            min: 0,
+            max: 60,
+            values: [ 0, 60 ],
+            slide: function( event, ui ) {
+                $('#song_duration_range_text').val('Song duration (' + ui.values[0] + ' - ' + ui.values[1] + ' mins)');
+            }
+        });
+
+        $('#song_energy_range').slider({
+            range: true,
+            min: 0,
+            max: 1,
+            step: 0.01,
+            values: [ 0, 1 ],
+            slide: function( event, ui ) {
+                $('#song_energy_range_text').val('Song energy (' + ui.values[0] + ' - ' + ui.values[1] + ')');
+            }
+        });
+
+        $("#load_tracks").button( { label: "Load Tracks" } )
+        $("#load_tracks").click( function() {
+            if (client_code == "") {
+                generate()
+                return;
+            }
+
+            socket.send(JSON.stringify({
+                'type': 'load_tracks',
+                'client_code': client_code,
+                'redirect_uri': "http://" + window.location.host + "/"
+            }))
+        })
+
+        $("#generate").button( { label: "Generate" } )
+        $("#generate").click( function() { generate() })
+    });
+
+    </script>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/css/bootstrap.min.css" integrity="sha384-MCw98/SFnGE8fJT3GXwEOngsV7Zt27NXFoaoApmYm81iuXoPkFOJwJ8ERdknLPMO" crossorigin="anonymous">
+</head>
+<body class="ui-widget-content" style="border:0;">
+<center>
+    <table width=800>
+    <tr>
+        <td colspan=3 align="center">
+            <h1><br>Spotify Pomodoro Playlist Generator<br><br></h1>
+        </td>
+    </tr>
+    <tr>
+        <td width=250>
+            Starting key
+        </td>
+        <td colspan=2>
+            <select id="key" style="width:100%">
+              <option>C Major</option>
+              <option>C minor</option>
+              <option>C# Major</option>
+              <option>C# minor</option>
+              <option>D Major</option>
+              <option>D minor</option>
+              <option>Eb Major</option>
+              <option>Eb minor</option>
+              <option>E Major</option>
+              <option>E minor</option>
+              <option>F Major</option>
+              <option>F minor</option>
+              <option>Gb Major</option>
+              <option>Gb minor</option>
+              <option>G Major</option>
+              <option>G minor</option>
+              <option>Ab Major</option>
+              <option>Ab minor</option>
+              <option>A Major</option>
+              <option>A minor</option>
+              <option>Bb Major</option>
+              <option>Bb minor</option>
+              <option>B Major</option>
+              <option>B minor</option>
+            </select>
+        </td>
+    </tr>
+    <tr>
+        <td colspan=3>&nbsp;</td>
+    </tr>
+    <tr>
+        <td width=250>
+            Strategy
+        </td>
+        <td>
+            <select id="strategy" style="width:100%">
+              <option>Root key +5 semitones</option>
+              <option>Root key +6 semitones</option>
+              <option>Same root key</option>
+            </select>
+        </td>
+        <td align="right" width=200>
+            <input id="toggle_major_minor" type="checkbox">&nbsp;Alternate major/minor</input>
+        </td>
+    </tr>
+    <tr>
+        <td colspan=3>&nbsp;</td>
+    </tr>
+    <tr>
+        <td width=250>
+            Playlist name
+        </td>
+        <td colspan=2>
+            <input type="text" id="playlist_name" style="width:100%" value="Pomodoro">
+        </td>
+    </tr>
+    <tr>
+        <td colspan=3>&nbsp;</td>
+    </tr>
+    <tr>
+        <td width=250>
+            <input type="text" id="playlist_duration_text" readonly style="border:0;">
+        </td>
+        <td colspan=2>
+            <div id="playlist_duration"></div>
+        </td>
+    </tr>
+    <tr>
+        <td colspan=3>&nbsp;</td>
+    </tr>
+    <tr>
+        <td width=250>
+            <input type="text" id="song_duration_range_text" readonly style="border:0;">
+        </td>
+        <td colspan=2>
+            <div id="song_duration_range"></div>
+        </td>
+    </tr>
+    <tr>
+        <td colspan=3>&nbsp;</td>
+    </tr>
+    <tr>
+        <td width=250>
+            <input type="text" id="song_energy_range_text" readonly style="border:0;">
+        </td>
+        <td colspan=2>
+            <div id="song_energy_range"></div>
+        </td>
+    </tr>
+    <tr>
+        <td colspan=3>&nbsp;</td>
+    </tr>
+    <tr>
+        <td align="left" colspan=3>
+            <div align="left" id="load_tracks"></div>
+            <div align="left" id="generate"></div>
+        </td>
+    </tr>
+    <tr>
+        <td colspan=3>&nbsp;</td>
+    </tr>
+    <tr>
+        <td align="center" colspan=3>
+            <textarea rows=20 cols=100 id="log" readonly></textarea>
+        </td>
+    </tr>
+    </table>
+    <br>
+</center>
+</body>
+</html>
