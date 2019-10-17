@@ -46,8 +46,14 @@ class NoCacheStaticFileHandler(web.StaticFileHandler):
 
 class ApiHandler(websocket.WebSocketHandler):
     # spotify API authentication
-    client_id = os.environ["CLIENT_ID"]
-    client_secret = os.environ["CLIENT_SECRET"]
+    client_id = os.environ.get("CLIENT_ID", "")
+    client_secret = os.environ.get("CLIENT_SECRET", "")
+    
+    if client_id == '' or client_secret == '':
+        print("In order to use this script, you'll need to create a spotify app in the developer console.")
+        print("This app needs to have http://localhost/ as a redirect url.")
+        print("After creating this app, you'll need to set the environment variables CLIENT_ID and CLIENT_SECRET.")
+        exit(1)
 
     # HTTP configuration
     parallel_http = 16
