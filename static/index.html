@@ -34,7 +34,7 @@
                 window.localStorage.setItem("client_code", urlParams.get("code"))
             }
 
-            client_code = window.localStorage.getItem("client_code")
+            client_code = window.localStorage.getItem("client_code") || ""
 
             playlist_name = window.localStorage.getItem("playlist_name") || "Pomodoro"
             key = parseInt(window.localStorage.getItem("key")) || 0

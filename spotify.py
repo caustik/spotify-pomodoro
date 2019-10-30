@@ -9,7 +9,7 @@
 import multiprocessing, subprocess, requests, datetime, itertools, argparse, asyncio, random, time, json, sys, os, io
 
 from dateutil.parser import parse as date_parse
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, urlencode, parse_qs
 from tornado import websocket, web, ioloop, httpserver, httpclient, gen
 from itertools import product
 
@@ -99,17 +99,26 @@ class ApiHandler(websocket.WebSocketHandler):
             client_code = message["client_code"]
             redirect_uri = message["redirect_uri"]
 
+            if client_code == "":
+                self.write_message(json.dumps( {
+                    "type": "authenticate",
+                    "client_id": self.client_id
+                }))
+                return
+
             self.send_message("Fetching access token...")
 
-            response = yield self.http.fetch("https://accounts.spotify.com/api/token", 
-                method = 'POST',
-                data = {
+            data = {
                 'grant_type': 'authorization_code',
                 'code': client_code,
                 'redirect_uri': redirect_uri,
                 'client_id': self.client_id,
                 'client_secret': self.client_secret
-                }
+            }
+
+            response = yield self.http.fetch("https://accounts.spotify.com/api/token", 
+                method='POST',
+                body=urlencode(data)
             )
             auth = json.loads(response.body.decode())
 
