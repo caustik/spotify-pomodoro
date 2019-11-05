@@ -76,6 +76,8 @@ class ApiHandler(websocket.WebSocketHandler):
     @gen.coroutine
     def on_message(self, message):
         parsed = json.loads(message)
+        if parsed["type"] == "get_client_id":
+            self.get_client_id(parsed)
         if parsed["type"] == "authenticate":
             self.authenticate(parsed)
         elif parsed["type"] == "load_tracks":
@@ -90,21 +92,26 @@ class ApiHandler(websocket.WebSocketHandler):
         }))
 
     @gen.coroutine
+    def get_client_id(self, message):
+        self.send_message("Getting client ID...")
+        self.write_message(json.dumps( {
+            "type": "authenticate",
+            "client_id": self.client_id
+        }))
+
+    @gen.coroutine
     def authenticate(self, message):
+        self.send_message("Authenicating...")
+
         self.tracks = [ ]
         self.load_config()
 
         # Get access token or use cached if available and not expired
-        if "expires_at" not in self.config or datetime.datetime.today() >= date_parse(self.config["expires_at"]):
+        if "expires_at" in self.config and datetime.datetime.today() < date_parse(self.config["expires_at"]):
+            self.send_message("Using cached access token.")
+        else:
             client_code = message["client_code"]
             redirect_uri = message["redirect_uri"]
-
-            if client_code == "":
-                self.write_message(json.dumps( {
-                    "type": "authenticate",
-                    "client_id": self.client_id
-                }))
-                return
 
             self.send_message("Fetching access token...")
 
@@ -132,8 +139,6 @@ class ApiHandler(websocket.WebSocketHandler):
             self.config["access_token"] = auth['access_token']
             self.config["expires_at"] = str(datetime.datetime.today() + datetime.timedelta(seconds = int(auth['expires_in'])))
             self.save_config()
-        else:
-            self.send_message("Using cached access token.")
 
         self.access_token = self.config["access_token"]
 
@@ -156,10 +161,15 @@ class ApiHandler(websocket.WebSocketHandler):
             self.send_message("Loaded {} tracks".format(len(self.user['tracks'])))
         except:
             self.user = { 'tracks': [ ], 'ETag': None }
+            self.send_message("No cached tracks found")
+
+        self.send_message("Authenication complete.")
 
     @gen.coroutine
     def load_tracks(self, message):
-        self.authenticate(message)
+        yield self.authenticate(message)
+
+        self.send_message("Loading user's tracks...")
 
         etag = self.user['ETag']    # used for cache-control, but seems very unreliable
         offset = 0                  # current offset into tracks
@@ -273,7 +283,9 @@ class ApiHandler(websocket.WebSocketHandler):
 
     @gen.coroutine
     def generate(self, message):
-        self.authenticate(message)
+        yield self.authenticate(message)
+
+        self.send_message("Generating track list...")
 
         random.seed()
 

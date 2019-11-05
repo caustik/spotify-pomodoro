@@ -31,10 +31,9 @@
         {
             var urlParams = new URLSearchParams(window.location.search)
             if (urlParams.has("code")) {
-                window.localStorage.setItem("client_code", urlParams.get("code"))
+                client_code = urlParams.get("code")
+                window.localStorage.setItem("client_code", client_code)
             }
-
-            client_code = window.localStorage.getItem("client_code") || ""
 
             playlist_name = window.localStorage.getItem("playlist_name") || "Pomodoro"
             key = parseInt(window.localStorage.getItem("key")) || 0
@@ -58,7 +57,7 @@
             update()
 
             if (client_code == "") {
-                generate()
+                getClientId()
                 return;
             }
 
@@ -66,6 +65,13 @@
                 'type': 'authenticate',
                 'client_code': client_code,
                 'redirect_uri': "http://" + window.location.host + "/"
+            }))
+        }
+
+        function getClientId()
+        {
+            socket.send(JSON.stringify({
+                'type': 'get_client_id',
             }))
         }
 
@@ -173,7 +179,7 @@
         $("#load_tracks").button( { label: "Load Tracks" } )
         $("#load_tracks").click( function() {
             if (client_code == "") {
-                generate()
+                getClientId()
                 return;
             }
 
