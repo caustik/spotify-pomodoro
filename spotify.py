@@ -167,8 +167,6 @@ class ApiHandler(websocket.WebSocketHandler):
 
     @gen.coroutine
     def load_tracks(self, message):
-        yield self.authenticate(message)
-
         self.send_message("Loading user's tracks...")
 
         etag = self.user['ETag']    # used for cache-control, but seems very unreliable
