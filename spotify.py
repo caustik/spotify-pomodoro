@@ -14,7 +14,7 @@ from tornado import websocket, web, ioloop, httpserver, httpclient, gen
 from itertools import product
 
 def fetch_http(url, headers):
-    return requests.get(url, headers = headers)
+    return requests.get(url, headers=headers)
 
 class CommandLine:
     def __init__(self):
@@ -173,6 +173,10 @@ class ApiHandler(websocket.WebSocketHandler):
         offset = 0                  # current offset into tracks
         total = 50                  # total number of tracks, is revised after each page of results
 
+        headers = { 'Authorization' : 'Bearer {:s}'.format(self.access_token) }
+        if self.user['ETag']:
+            headers['If-None-Match'] = self.user['ETag']
+
         # Get the user's saved songs
         while offset < total:
             # calculate number of pages to fetch at this iteration
@@ -181,12 +185,7 @@ class ApiHandler(websocket.WebSocketHandler):
             fetches = [ ]
             for i in range(parallel):
                 url = "https://api.spotify.com/v1/users/{:s}/tracks?offset={}&limit=50".format(self.user_id, offset)
-                fetches.append(self.http.fetch(url, 
-                    headers = {
-                        'Authorization' : 'Bearer {:s}'.format(self.access_token),
-                        'If-None-Match' : self.user['ETag']
-                    }
-                ))
+                fetches.append(self.http.fetch(url, headers=headers))
                 offset = offset + 50
                 self.send_message("Fetching {}...".format(url))
             # wait for responses
@@ -232,12 +231,7 @@ class ApiHandler(websocket.WebSocketHandler):
                 ids = map(lambda x: x["track"]["id"], self.tracks[offset:offset+100])
                 ids = ','.join(ids)
                 url = "https://api.spotify.com/v1/audio-features?ids={:s}".format(ids)
-                fetches.append(self.http.fetch(url, 
-                    headers = {
-                        'Authorization' : 'Bearer {:s}'.format(self.access_token),
-                        'If-None-Match' : self.user['ETag']
-                    }
-                ))
+                fetches.append(self.http.fetch(url, headers=headers))
                 offset = min(offset + 100, total)
                 self.send_message("Fetching audio features ({}/{})".format(offset, len(self.tracks)))
             # wait for responses
