@@ -399,6 +399,7 @@ class ApiHandler(websocket.WebSocketHandler):
                     self.key = (self.key + 6) % 12
             return True
 
+    @gen.coroutine
     def find_playlist(self, playlist_name):
         for playlist in self.playlists:
             if playlist["name"] == playlist_name:
