@@ -14,14 +14,14 @@ from tornado import websocket, web, ioloop, httpserver, httpclient, gen
 from itertools import product
 
 class CommandLine:
+    # currently supported CLI commands
+    commands = [ "server" ]
+
     def __init__(self):
-        # prepare command line argument parser
-        commands = [ "server" ]
+        # parse command-line arguments and execute the command
         arg_parser = argparse.ArgumentParser(description="generate random pomodoro length playlists from user's tracks", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-        arg_parser.add_argument('-c', dest='command', choices=commands, required=False, default="server", help='command')
-        # parse command line arguments
+        arg_parser.add_argument('-c', dest='command', choices=self.commands, required=False, default="server", help='command')
         self.args = arg_parser.parse_args()
-        # execute command
         getattr(globals()['CommandLine'], self.args.command)(self)
 
     def server(self):
@@ -45,7 +45,6 @@ class ApiHandler(websocket.WebSocketHandler):
     # spotify API authentication
     client_id = os.environ.get("CLIENT_ID", "")
     client_secret = os.environ.get("CLIENT_SECRET", "")
-    
     if client_id == '' or client_secret == '':
         print("In order to use this script, you'll need to create a spotify app in the developer console.")
         print("This app needs to have http://localhost/ as a redirect url.")
