@@ -13,9 +13,6 @@ from urllib.parse import urlparse, urlencode, parse_qs
 from tornado import websocket, web, ioloop, httpserver, httpclient, gen
 from itertools import product
 
-def fetch_http(url, headers):
-    return requests.get(url, headers=headers)
-
 class CommandLine:
     def __init__(self):
         # prepare command line argument parser
@@ -70,50 +67,54 @@ class ApiHandler(websocket.WebSocketHandler):
     def check_origin(self, origin):
         return True
 
+    @gen.coroutine
     def open(self, *args):
-        self.send_message("Connected")
+        yield self.send_message("Connected")
 
     @gen.coroutine
-    def on_message(self, message):
-        parsed = json.loads(message)
-        if parsed["type"] == "get_client_id":
-            self.get_client_id(parsed)
-        if parsed["type"] == "authenticate":
-            self.authenticate(parsed)
-        elif parsed["type"] == "load_tracks":
-            self.load_tracks(parsed)
-        elif parsed["type"] == "generate":
-            self.generate(parsed)
-
     def send_message(self, text):
-        self.write_message(json.dumps({
+        yield self.write_message(json.dumps({
             "type": "message",
             "text": text
         }))
 
     @gen.coroutine
+    def on_message(self, message):
+        parsed = json.loads(message)
+        yield { 
+            'get_client_id': self.get_client_id,
+            'authenticate': self.authenticate,
+            'load_tracks': self.load_tracks,
+            'generate': self.generate
+        }.get(parsed['type'], self.unknown)(parsed)
+
+    @gen.coroutine
+    def unknown(self, message):
+        yield self.send_message("Unknown command")
+
+    @gen.coroutine
     def get_client_id(self, message):
-        self.send_message("Getting client ID...")
-        self.write_message(json.dumps( {
+        yield self.send_message("Getting client ID...")
+        yield self.write_message(json.dumps( {
             "type": "authenticate",
             "client_id": self.client_id
         }))
 
     @gen.coroutine
     def authenticate(self, message):
-        self.send_message("Authenicating...")
+        yield self.send_message("Authenicating...")
 
         self.tracks = [ ]
         self.load_config()
 
         # Get access token or use cached if available and not expired
         if "expires_at" in self.config and datetime.datetime.today() < date_parse(self.config["expires_at"]):
-            self.send_message("Using cached access token.")
+            yield self.send_message("Using cached access token.")
         else:
+            yield self.send_message("Fetching access token...")
+
             client_code = message["client_code"]
             redirect_uri = message["redirect_uri"]
-
-            self.send_message("Fetching access token...")
 
             data = {
                 'grant_type': 'authorization_code',
@@ -130,7 +131,7 @@ class ApiHandler(websocket.WebSocketHandler):
             auth = json.loads(response.body.decode())
 
             if "access_token" not in auth:
-                self.write_message(json.dumps( {
+                yield self.write_message(json.dumps( {
                     "type": "authenticate",
                     "client_id": self.client_id
                 }))
@@ -143,7 +144,7 @@ class ApiHandler(websocket.WebSocketHandler):
         self.access_token = self.config["access_token"]
 
         # Get spotify user id
-        self.send_message("Fetching user ID...")
+        yield self.send_message("Fetching user ID...")
 
         response = yield self.http.fetch("https://api.spotify.com/v1/me", 
             headers = { 
@@ -152,22 +153,22 @@ class ApiHandler(websocket.WebSocketHandler):
         )
         self.user_id = json.loads(response.body.decode())['id']
 
-        self.send_message("User ID: {}".format(self.user_id))
+        yield self.send_message("User ID: {}".format(self.user_id))
         
         # Load cached user data
         try:
             with open ('cache/{}.json'.format(self.user_id), 'r') as inpfile:
                 self.user = json.load(inpfile)
-            self.send_message("Loaded {} tracks".format(len(self.user['tracks'])))
+            yield self.send_message("Loaded {} tracks".format(len(self.user['tracks'])))
         except:
             self.user = { 'tracks': [ ], 'ETag': None }
-            self.send_message("No cached tracks found")
+            yield self.send_message("No cached tracks found")
 
-        self.send_message("Authenication complete.")
+        yield self.send_message("Authenication complete.")
 
     @gen.coroutine
     def load_tracks(self, message):
-        self.send_message("Loading user's tracks...")
+        yield self.send_message("Loading user's tracks...")
 
         etag = self.user['ETag']    # used for cache-control, but seems very unreliable
         offset = 0                  # current offset into tracks
@@ -187,14 +188,14 @@ class ApiHandler(websocket.WebSocketHandler):
                 url = "https://api.spotify.com/v1/users/{:s}/tracks?offset={}&limit=50".format(self.user_id, offset)
                 fetches.append(self.http.fetch(url, headers=headers))
                 offset = offset + 50
-                self.send_message("Fetching {}...".format(url))
+                yield self.send_message("Fetching {}...".format(url))
             # wait for responses
             tasks = yield fetches
             # validate HTTP status codes, restarting on failure
             valid = True;
             for response in tasks:
                 if response.code != 200:
-                    self.send_message("Error: Server returned HTTP {}, retrying...".format(response.status_code))
+                    yield self.send_message("Error: Server returned HTTP {}, retrying...".format(response.status_code))
                     offset = offset - len(tasks)*50
                     valid = False
             if not valid:
@@ -202,7 +203,7 @@ class ApiHandler(websocket.WebSocketHandler):
             # parse tracks from the set of responses
             for response in tasks:
                 if response.code == 304:
-                    self.send_message("Using cached tracks")
+                    yield self.send_message("Using cached tracks")
                     self.tracks = self.user['tracks']
                     break
                 elif etag == None:
@@ -233,14 +234,14 @@ class ApiHandler(websocket.WebSocketHandler):
                 url = "https://api.spotify.com/v1/audio-features?ids={:s}".format(ids)
                 fetches.append(self.http.fetch(url, headers=headers))
                 offset = min(offset + 100, total)
-                self.send_message("Fetching audio features ({}/{})".format(offset, len(self.tracks)))
+                yield self.send_message("Fetching audio features ({}/{})".format(offset, len(self.tracks)))
             # wait for responses
             current_tasks = yield fetches
             # validate HTTP status codes, restarting on failure
             valid = True;
             for response in current_tasks:
                 if response.code != 200:
-                    self.send_message("Error: Server returned HTTP {}, retrying...".format(response.status_code))
+                    yield self.send_message("Error: Server returned HTTP {}, retrying...".format(response.status_code))
                     offset = offset - len(current_tasks)*100
                     valid = False
             if not valid:
@@ -252,7 +253,7 @@ class ApiHandler(websocket.WebSocketHandler):
         # parse audio features from the set of responses
         for response in responses:
             if response.code == 304:
-                self.send_message("Using cached audio information")
+                yield self.send_message("Using cached audio information")
                 break
             response = json.loads(response.body.decode())
             keys = list(map(lambda x: x["key"] if x and "key" in x else -1, response["audio_features"]))
@@ -267,7 +268,7 @@ class ApiHandler(websocket.WebSocketHandler):
         self.user['tracks'] = self.tracks
         self.user['ETag'] = etag
 
-        self.send_message("Tracks were loaded.")
+        yield self.send_message("Tracks were loaded.")
 
         # Save cached user data
         with open('cache/{}.json'.format(self.user_id), 'w') as outfile:
@@ -276,8 +277,7 @@ class ApiHandler(websocket.WebSocketHandler):
     @gen.coroutine
     def generate(self, message):
         yield self.authenticate(message)
-
-        self.send_message("Generating track list...")
+        yield self.send_message("Generating track list...")
 
         random.seed()
 
@@ -287,7 +287,7 @@ class ApiHandler(websocket.WebSocketHandler):
         # Get the user's playlists
         url = "https://api.spotify.com/v1/users/{:s}/playlists?limit=50".format(self.user_id)
         while url != None:
-            self.send_message("Fetching {}...".format(url))
+            yield self.send_message("Fetching {}...".format(url))
             
             response = yield self.http.fetch(url, 
                 headers = { 
@@ -301,7 +301,8 @@ class ApiHandler(websocket.WebSocketHandler):
             url = response['next']
 
         # Generate the playlist
-        self.send_message("Generating playlist...")
+        yield self.send_message("Generating playlist...")
+
         self.key = message['key']
         self.mode = message['mode']
         self.strategy = message['strategy']
@@ -314,8 +315,8 @@ class ApiHandler(websocket.WebSocketHandler):
         self.min_energy = message['min_energy']
         self.max_energy = message['max_energy']
 
-        self.send_message("Key: {} {}".format(self.key_names[self.key], self.mode_names[self.mode]))
-        self.send_message("Strategy: {}".format(self.strategy_names[self.strategy]))
+        yield self.send_message("Key: {} {}".format(self.key_names[self.key], self.mode_names[self.mode]))
+        yield self.send_message("Strategy: {}".format(self.strategy_names[self.strategy]))
 
         self.tracklist = [ ]
         self.current_duration = 0
@@ -323,7 +324,7 @@ class ApiHandler(websocket.WebSocketHandler):
         while self.find_next():
             pass
 
-        self.send_message("Target duration: {}, actual: {:.2f}".format(self.playlist_duration, self.current_duration / 1000 / 60))
+        yield self.send_message("Target duration: {}, actual: {:.2f}".format(self.playlist_duration, self.current_duration / 1000 / 60))
 
         # Create the playlist, or find existing
         key_name = "{:s} {:s}".format(self.key_names[self.key] if self.key != -1 else "ALL", self.mode_names[self.mode] if self.mode != -1 else "ALL")
@@ -332,7 +333,7 @@ class ApiHandler(websocket.WebSocketHandler):
         playlist_url = self.find_playlist(playlist_name)
         if playlist_url == None:
             url = "https://api.spotify.com/v1/users/{:s}/playlists".format(self.user_id)
-            self.send_message("Creating playlist {}".format(playlist_name))
+            yield self.send_message("Creating playlist {}".format(playlist_name))
             response = yield self.http.fetch(url, 
                 method = 'POST',
                 headers = { 
@@ -347,7 +348,7 @@ class ApiHandler(websocket.WebSocketHandler):
             playlist_url = playlist["tracks"]["href"]
 
         # Put the songs into the playlist
-        self.send_message("Saving tracks to playlist {}".format(playlist_name))
+        yield self.send_message("Saving tracks to playlist {}".format(playlist_name))
 
         response = yield self.http.fetch(playlist_url, 
             method = 'PUT',
@@ -360,6 +361,7 @@ class ApiHandler(websocket.WebSocketHandler):
         )
         snapshot_id = json.loads(response.body.decode())
 
+    @gen.coroutine
     def find_next(self):
         random.shuffle(self.tracks)
         if self.strategy == 3:
@@ -385,7 +387,7 @@ class ApiHandler(websocket.WebSocketHandler):
             self.current_duration = self.current_duration + track_duration_ms
             self.tracklist.append(track["track"]["uri"])
             track["used"] = True
-            self.send_message("{} {}".format(self.key_names[self.key], self.mode_names[self.mode]))
+            yield self.send_message("{} {}".format(self.key_names[self.key], self.mode_names[self.mode]))
             if self.toggle_major_minor == 1:
                 if self.toggle_state == 1:
                     self.mode = 1 - self.mode
@@ -400,7 +402,7 @@ class ApiHandler(websocket.WebSocketHandler):
     def find_playlist(self, playlist_name):
         for playlist in self.playlists:
             if playlist["name"] == playlist_name:
-                self.send_message("Found existing playlist: {:s}".format(playlist["href"]))
+                yield self.send_message("Found existing playlist: {:s}".format(playlist["href"]))
                 return playlist["tracks"]["href"]
         return None
 
